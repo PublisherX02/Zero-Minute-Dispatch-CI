@@ -14,14 +14,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          branch: dev
-          base: main
-          title: "New code ready - merge dev into main"
-          body: "Automated PR by CD pipeline. Review and merge when ready."
+      - name: Create PR via GitHub CLI
+        run: |
+          gh pr create \
+            --base main \
+            --head dev \
+            --title "New code ready - merge dev into main" \
+            --body "Automated PR. CI tests passed on dev. Review and merge when ready." \
+            || echo "PR already exists"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
