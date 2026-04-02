@@ -1,0 +1,22 @@
+name: Auto Pull Request to Main
+
+on:
+  push:
+    branches: [dev]
+
+jobs:
+  create-pr:
+    name: Create Pull Request to Main
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: dev
+          base: main
+          title: "New code ready for review - merge dev into main"
+          body: "Automated PR created by CD pipeline. CI tests passed on dev."
