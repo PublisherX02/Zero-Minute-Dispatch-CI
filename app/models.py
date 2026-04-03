@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel, field_validator
 
 
@@ -12,6 +12,8 @@ class PriorityLevel(str, Enum):
 class IncidentMetadata(BaseModel):
     priority_level: PriorityLevel
     confidence_score: float
+    estimated_victims: int = 0
+    location_description: Optional[str] = None
 
     @field_validator("confidence_score")
     @classmethod
@@ -30,6 +32,24 @@ class ExtractedMedicalEntities(BaseModel):
 class DispatchRecommendation(BaseModel):
     required_specialists: List[str]
     equipment_loadout: List[str]
+    nearest_hospital: Optional[str] = None
+    nearest_fire_station: Optional[str] = None
+    nearest_hydrant: Optional[str] = None
+
+
+class ScamAssessment(BaseModel):
+    gemini_scam_score: float = 0.0
+    nlp_scam_score: float = 0.0
+    final_scam_probability: float = 0.0
+    is_suspected_scam: bool = False
+    scam_indicators: List[str] = []
+
+    @field_validator("gemini_scam_score", "nlp_scam_score", "final_scam_probability")
+    @classmethod
+    def validate_scores(cls, v: float) -> float:
+        if not (0.0 <= v <= 1.0):
+            raise ValueError("Score must be between 0.0 and 1.0")
+        return v
 
 
 class TriageReport(BaseModel):
@@ -37,8 +57,11 @@ class TriageReport(BaseModel):
     extracted_medical_entities: ExtractedMedicalEntities
     environmental_hazards: List[str]
     dispatch_recommendation: DispatchRecommendation
+    scam_assessment: ScamAssessment = ScamAssessment()
     requires_human_verification: bool = False
 
     def check_verification_needed(self) -> None:
         if self.incident_metadata.confidence_score < 0.85:
+            self.requires_human_verification = True
+        if self.scam_assessment.final_scam_probability > 0.7:
             self.requires_human_verification = True
