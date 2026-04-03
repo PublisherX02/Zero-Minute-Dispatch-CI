@@ -22,11 +22,20 @@ def health_check():
     return {"status": "operational" , "system": "Zero-Minute Dispatch"}
 
 @app.post("/analyze")
-async def analyze_scene(video: UploadFile = File(...)):
-    with tempfile.NamedTemporaryFile(delete=False , suffix=".mp4") as tmp:
-        content = await video.read()
+async def analyze_scene(file: UploadFile = File(...)):
+    # Detect file type
+    filename = file.filename.lower()
+    
+    if filename.endswith('.mp3') or filename.endswith('.wav') or filename.endswith('.m4a'):
+        suffix = "." + filename.split(".")[-1]
+    else:
+        suffix = ".mp4"
+    
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        content = await file.read()
         tmp.write(content)
-        tmp_path = tmp.name 
+        tmp_path = tmp.name
+
     try:
         report = analyze_emergency_scene(tmp_path)
         return report.model_dump()

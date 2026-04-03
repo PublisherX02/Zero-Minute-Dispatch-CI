@@ -6,9 +6,9 @@ import google.generativeai as genai
 import json
 import time
 from dotenv import load_dotenv
-from app.models import TriageReport
+from app.models import TriageReport, ScamAssessment, IncidentMetadata, ExtractedMedicalEntities, DispatchRecommendation
 
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
 
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
@@ -60,17 +60,13 @@ Rules:
 - nearest_hospital, nearest_fire_station, nearest_hydrant: always null (populated by routing layer)
 """
 
-# Initialize once at module level — not on every request
+# Initialize once at module level
 scam_classifier = hf_pipeline(
     "zero-shot-classification",
     model="facebook/bart-large-mnli"
 )
 
 def detect_scam_nlp(transcript: str) -> float:
-    """
-    Uses BART zero-shot classifier to assess scam probability from transcript.
-    Returns float between 0.0 (genuine) and 1.0 (scam)
-    """
     if not transcript or len(transcript.strip()) < 10:
         return 0.0
 
@@ -92,9 +88,6 @@ def detect_scam_nlp(transcript: str) -> float:
 
 
 def analyze_emergency_scene(video_path: str) -> TriageReport:
-    """
-    Takes a video file path, sends to Gemini, returns validated TriageReport
-    """
     model = genai.GenerativeModel("gemini-2.5-flash")
 
     print("Uploading video to Gemini...")
@@ -131,6 +124,36 @@ def analyze_emergency_scene(video_path: str) -> TriageReport:
     raw_json = json.loads(raw_text)
     report = TriageReport(**raw_json)
 
+    # EARLY SCAM EXIT
+    if report.scam_assessment.gemini_scam_score >= 0.7:
+        return TriageReport(
+            incident_metadata=IncidentMetadata(
+                priority_level="CODE_GREEN",
+                confidence_score=1.0,
+                estimated_victims=0,
+                location_description="TRACE REQUIRED"
+            ),
+            extracted_medical_entities=ExtractedMedicalEntities(
+                suspected_primary_condition="SCAM CALL DETECTED - DO NOT DISPATCH",
+                respiratory_estimate="N/A",
+                consciousness_level="N/A"
+            ),
+            environmental_hazards=[],
+            dispatch_recommendation=DispatchRecommendation(
+                required_specialists=["Law Enforcement - False Alarm Protocol"],
+                equipment_loadout=[]
+            ),
+            scam_assessment=ScamAssessment(
+                gemini_scam_score=report.scam_assessment.gemini_scam_score,
+                nlp_scam_score=0.0,
+                final_scam_probability=report.scam_assessment.gemini_scam_score,
+                is_suspected_scam=True,
+                scam_indicators=report.scam_assessment.scam_indicators
+            ),
+            requires_human_verification=True
+        )
+
+    # Genuine call — run NLP scam detector
     transcript = report.incident_metadata.location_description or ""
     nlp_score = detect_scam_nlp(transcript)
 
