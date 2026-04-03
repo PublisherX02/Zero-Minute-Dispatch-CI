@@ -24,9 +24,9 @@ class IncidentMetadata(BaseModel):
 
 
 class ExtractedMedicalEntities(BaseModel):
-    suspected_primary_condition: str
-    respiratory_estimate: str
-    consciousness_level: str
+    suspected_primary_condition: Optional[str] = "Not applicable"
+    respiratory_estimate: Optional[str] = "Not applicable"
+    consciousness_level: Optional[str] = "Not applicable"
 
 
 class DispatchRecommendation(BaseModel):
