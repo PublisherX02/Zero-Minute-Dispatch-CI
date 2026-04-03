@@ -1,7 +1,7 @@
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+from transformers import pipeline as hf_pipeline
 import google.generativeai as genai
 import json
 import time
@@ -60,17 +60,46 @@ Rules:
 - nearest_hospital, nearest_fire_station, nearest_hydrant: always null (populated by routing layer)
 """
 
+# Initialize once at module level — not on every request
+scam_classifier = hf_pipeline(
+    "zero-shot-classification",
+    model="facebook/bart-large-mnli"
+)
+
+def detect_scam_nlp(transcript: str) -> float:
+    """
+    Uses BART zero-shot classifier to assess scam probability from transcript.
+    Returns float between 0.0 (genuine) and 1.0 (scam)
+    """
+    if not transcript or len(transcript.strip()) < 10:
+        return 0.0
+
+    result = scam_classifier(
+        transcript,
+        candidate_labels=["genuine emergency call", "false alarm", "prank call"]
+    )
+
+    labels = result["labels"]
+    scores = result["scores"]
+    label_score_map = dict(zip(labels, scores))
+
+    scam_score = (
+        label_score_map.get("false alarm", 0.0) +
+        label_score_map.get("prank call", 0.0)
+    )
+
+    return round(min(scam_score, 1.0), 3)
+
+
 def analyze_emergency_scene(video_path: str) -> TriageReport:
     """
     Takes a video file path, sends to Gemini, returns validated TriageReport
     """
     model = genai.GenerativeModel("gemini-2.5-flash")
 
-    # Upload video to Gemini
     print("Uploading video to Gemini...")
     video_file = genai.upload_file(video_path)
 
-    # Wait for file to become ACTIVE
     print("Waiting for file to process...")
     while video_file.state.name == "PROCESSING":
         time.sleep(2)
@@ -80,7 +109,6 @@ def analyze_emergency_scene(video_path: str) -> TriageReport:
     if video_file.state.name == "FAILED":
         raise ValueError("Video processing failed")
 
-    # Single API call — genuine multimodal
     print("Analyzing scene...")
     response = model.generate_content(
         [video_file, SYSTEM_PROMPT],
@@ -90,22 +118,30 @@ def analyze_emergency_scene(video_path: str) -> TriageReport:
         )
     )
 
-    # Clean response — remove markdown if present
     raw_text = response.text.strip()
-    
-    # Remove markdown code blocks if Gemini wrapped the JSON
+
     if raw_text.startswith("```"):
         raw_text = raw_text.split("```")[1]
         if raw_text.startswith("json"):
             raw_text = raw_text[4:]
         raw_text = raw_text.strip()
 
-    # Print so we can see what Gemini returned
     print(f"Gemini response: {raw_text}")
 
-    # Parse and validate through Pydantic
     raw_json = json.loads(raw_text)
     report = TriageReport(**raw_json)
+
+    transcript = report.incident_metadata.location_description or ""
+    nlp_score = detect_scam_nlp(transcript)
+
+    report.scam_assessment.nlp_scam_score = nlp_score
+    report.scam_assessment.final_scam_probability = round(
+        (report.scam_assessment.gemini_scam_score + nlp_score) / 2, 3
+    )
+    report.scam_assessment.is_suspected_scam = (
+        report.scam_assessment.final_scam_probability > 0.7
+    )
+
     report.check_verification_needed()
 
     return report
