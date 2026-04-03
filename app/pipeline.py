@@ -12,6 +12,9 @@ load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
+dotenv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
+load_dotenv(dotenv_path=dotenv_path, override=True)
+
 SYSTEM_PROMPT = """
 You are a medical triage AI assistant for emergency services.
 Analyze the provided emergency scene video and audio, then return ONLY a valid JSON object.
@@ -125,7 +128,7 @@ def analyze_emergency_scene(video_path: str) -> TriageReport:
     report = TriageReport(**raw_json)
 
     # EARLY SCAM EXIT
-    if report.scam_assessment.gemini_scam_score >= 0.7:
+    if report.scam_assessment.gemini_scam_score >= 0.85:
         return TriageReport(
             incident_metadata=IncidentMetadata(
                 priority_level="CODE_GREEN",
