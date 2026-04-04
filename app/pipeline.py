@@ -6,13 +6,12 @@ import google.generativeai as genai
 import json
 import time
 from dotenv import load_dotenv
-from app.models import TriageReport, ScamAssessment, IncidentMetadata, ExtractedMedicalEntities, DispatchRecommendation, HospitalAlert
-from app.hospital import find_best_hospital
+from app.models import TriageReport, ScamAssessment, IncidentMetadata, ExtractedMedicalEntities, DispatchRecommendation
 import requests
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
-
+from app.hospital import find_best_hospital
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-
+from app.models import TriageReport, ScamAssessment, IncidentMetadata, ExtractedMedicalEntities, DispatchRecommendation, HospitalAlert
 dotenv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
 load_dotenv(dotenv_path=dotenv_path, override=True)
 
@@ -62,6 +61,8 @@ Rules:
 - Never invent injuries you cannot observe or hear
 - environmental_hazards can be empty list if none detected
 - nearest_hospital, nearest_fire_station, nearest_hydrant: always null (populated by routing layer)
+- respiratory_estimate: analyze chest rise/fall patterns visible in video to estimate breathing rate (e.g. "Rapid ~24 breaths/min", "Shallow/Irregular", "No visible chest movement — apnea suspected")
+- If patient is visible and video is long enough, attempt to estimate heart rate from subtle chest/neck pulse movements. Add as "cardiac_estimate" field if detectable, otherwise "Not detectable from video"
 """
 
 # Initialize once at module level
@@ -89,6 +90,38 @@ def detect_scam_nlp(transcript: str) -> float:
     )
 
     return round(min(scam_score, 1.0), 3)
+
+def generate_hospital_alert(report: TriageReport) -> dict:
+    """
+    Finds best hospital and generates prep instructions via Gemini
+    """
+    injury = report.extracted_medical_entities.suspected_primary_condition or "General trauma"
+    
+    # Find best hospital from mock database
+    hospital = find_best_hospital(injury_type=injury)
+    
+    # Generate preparation instructions via Gemini
+    model = genai.GenerativeModel("gemini-2.5-flash")
+    prompt = f"""
+    You are a medical coordinator sending a pre-alert to a hospital.
+    
+    Patient incoming:
+    - Condition: {injury}
+    - Consciousness: {report.extracted_medical_entities.consciousness_level}
+    - Respiratory: {report.extracted_medical_entities.respiratory_estimate}
+    - Priority: {report.incident_metadata.priority_level}
+    - ETA: {hospital['eta_minutes']} minutes
+    
+    Write a brief 2-sentence hospital preparation instruction.
+    Be specific and medical. No fluff.
+    """
+    
+    response = model.generate_content(prompt)
+    
+    return {
+        **hospital,
+        "preparation_instructions": response.text.strip()
+    }
 
 
 def analyze_emergency_scene(video_path: str) -> TriageReport:
@@ -170,11 +203,21 @@ def analyze_emergency_scene(video_path: str) -> TriageReport:
     )
 
     report.check_verification_needed()
+    # Generate hospital alert for genuine emergencies
+    if not report.scam_assessment.is_suspected_scam and \
+       report.incident_metadata.priority_level.value in ["CODE_RED", "CODE_ORANGE"]:
+        
+        hospital_data = generate_hospital_alert(report)
+        report.hospital_alert = HospitalAlert(**hospital_data)
 
-    injury = report.extracted_medical_entities.suspected_primary_condition or "trauma"
-    hospital_data = find_best_hospital(injury)
-    report.hospital_alert = HospitalAlert(**hospital_data)
-
+    # Priority queue — simple mock
+    from app.models import PriorityQueue
+    report.priority_queue = PriorityQueue(
+        queue_position=1,
+        total_active_incidents=1,
+        ambulances_available=3,
+        priority_reason=f"{report.incident_metadata.priority_level} — immediate dispatch"
+    )
     return report
 
 
