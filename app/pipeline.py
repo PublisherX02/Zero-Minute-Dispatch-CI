@@ -6,7 +6,8 @@ import google.generativeai as genai
 import json
 import time
 from dotenv import load_dotenv
-from app.models import TriageReport, ScamAssessment, IncidentMetadata, ExtractedMedicalEntities, DispatchRecommendation
+from app.models import TriageReport, ScamAssessment, IncidentMetadata, ExtractedMedicalEntities, DispatchRecommendation, HospitalAlert
+from app.hospital import find_best_hospital
 import requests
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
 
@@ -169,6 +170,10 @@ def analyze_emergency_scene(video_path: str) -> TriageReport:
     )
 
     report.check_verification_needed()
+
+    injury = report.extracted_medical_entities.suspected_primary_condition or "trauma"
+    hospital_data = find_best_hospital(injury)
+    report.hospital_alert = HospitalAlert(**hospital_data)
 
     return report
 
