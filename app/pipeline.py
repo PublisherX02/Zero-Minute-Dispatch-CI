@@ -257,3 +257,50 @@ def get_nearest_hospital(location: str, injury_type: str) -> dict:
             "lon": hospital.get("lon")
         }
     return {"name": "Nearest Hospital", "address": "Unable to locate"}
+
+def get_traffic_route(origin_lat: float, origin_lon: float, 
+                       dest_lat: float, dest_lon: float) -> dict:
+    """
+    Gets real-time traffic routing from TomTom API
+    """
+    tomtom_key = os.getenv("TOMTOM_API_KEY")
+    
+    url = f"https://api.tomtom.com/routing/1/calculateRoute/{origin_lat},{origin_lon}:{dest_lat},{dest_lon}/json"
+    
+    params = {
+        "key": tomtom_key,
+        "traffic": "true",
+        "travelMode": "car",
+        "routeType": "fastest"
+    }
+    
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        route = data["routes"][0]["summary"]
+        travel_minutes = round(route["travelTimeInSeconds"] / 60)
+        distance_km = round(route["lengthInMeters"] / 1000, 1)
+        traffic_delay = round(route.get("trafficDelayInSeconds", 0) / 60)
+        
+        if traffic_delay > 5:
+            condition = f"Heavy traffic — {traffic_delay} min delay"
+        elif traffic_delay > 2:
+            condition = f"Moderate traffic — {traffic_delay} min delay"
+        else:
+            condition = "Clear — optimal route"
+            
+        return {
+            "travel_time_minutes": travel_minutes,
+            "distance_km": distance_km,
+            "traffic_condition": condition,
+            "traffic_delay_minutes": traffic_delay
+        }
+    except Exception as e:
+        print(f"TomTom error: {e}")
+        return {
+            "travel_time_minutes": 0,
+            "distance_km": 0,
+            "traffic_condition": "Traffic data unavailable",
+            "traffic_delay_minutes": 0
+        }

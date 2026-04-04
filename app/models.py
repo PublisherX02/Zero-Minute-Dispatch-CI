@@ -84,6 +84,12 @@ class TriageReport(BaseModel):
         if self.scam_assessment.final_scam_probability > 0.7:
             self.requires_human_verification = True
 
+class TrafficRoute(BaseModel):
+    travel_time_minutes: int = 0
+    distance_km: float = 0.0
+    traffic_condition: str = "Calculating..."
+    traffic_delay_minutes: int = 0
+
 class HospitalAlert(BaseModel):
     name: str = "Unknown"
     city: str = "Unknown"
@@ -93,9 +99,11 @@ class HospitalAlert(BaseModel):
     equipment: List[str] = []
     eta_minutes: int = 0
     preparation_instructions: Optional[str] = None
+    traffic_route: TrafficRoute = TrafficRoute()
 
 class PriorityQueue(BaseModel):
     queue_position: int = 1
     total_active_incidents: int = 1
     ambulances_available: int = 3
     priority_reason: str = "Single incident"
+
