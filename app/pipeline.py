@@ -128,7 +128,7 @@ def analyze_emergency_scene(video_path: str) -> TriageReport:
     report = TriageReport(**raw_json)
 
     # EARLY SCAM EXIT
-    if report.scam_assessment.gemini_scam_score >= 0.85:
+    if report.scam_assessment.gemini_scam_score >= 0.95:
         return TriageReport(
             incident_metadata=IncidentMetadata(
                 priority_level="CODE_GREEN",
