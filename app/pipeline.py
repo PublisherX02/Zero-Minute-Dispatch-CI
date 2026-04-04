@@ -7,7 +7,7 @@ import json
 import time
 from dotenv import load_dotenv
 from app.models import TriageReport, ScamAssessment, IncidentMetadata, ExtractedMedicalEntities, DispatchRecommendation
-
+import requests
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
 
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
@@ -171,3 +171,41 @@ def analyze_emergency_scene(video_path: str) -> TriageReport:
     report.check_verification_needed()
 
     return report
+
+
+
+
+def get_nearest_hospital(location: str, injury_type: str) -> dict:
+    
+    # Determine hospital type based on injury
+    if any(word in injury_type.lower() for word in ["cardiac", "heart", "chest"]):
+        query = f"cardiology hospital near {location} Tunisia"
+    elif any(word in injury_type.lower() for word in ["trauma", "head", "hemorrhage", "fracture"]):
+        query = f"trauma hospital near {location} Tunisia"
+    elif any(word in injury_type.lower() for word in ["burn"]):
+        query = f"burn center near {location} Tunisia"
+    else:
+        query = f"hospital near {location} Tunisia"
+
+    url = "https://nominatim.openstreetmap.org/search"
+    params = {
+        "q": query,
+        "format": "json",
+        "limit": 1,
+        "countrycodes": "tn"
+    }
+    headers = {"User-Agent": "ZeroMinuteDispatch/1.0"}
+    
+    response = requests.get(url, params=params, headers=headers)
+    results = response.json()
+    
+    if results:
+        hospital = results[0]
+        return {
+            "name": hospital.get("display_name", "Unknown Hospital").split(",")[0],
+            "distance_km": "Calculating...",
+            "address": hospital.get("display_name", ""),
+            "lat": hospital.get("lat"),
+            "lon": hospital.get("lon")
+        }
+    return {"name": "Nearest Hospital", "address": "Unable to locate"}
