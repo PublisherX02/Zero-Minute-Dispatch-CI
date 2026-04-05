@@ -1,0 +1,58 @@
+# ── Zero-Minute Dispatch — Backend ────────────────────────────────────────────
+# Base: python:3.11-slim (~130 MB) — Debian without dev tools
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# ── System deps ────────────────────────────────────────────────────────────────
+# Install curl (health-check) and clean up in the SAME layer so nothing
+# is cached in intermediate layers. --no-install-recommends skips docs,
+# manpages, and optional extras we never use.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Python deps ────────────────────────────────────────────────────────────────
+# --no-cache-dir   → pip does not write its cache to disk (saves ~200 MB)
+# CPU-only torch wheel → saves ~800 MB vs the default CUDA wheel
+# All in one RUN so the layer is as tight as possible.
+COPY requirements.txt .
+RUN pip install --upgrade pip --no-cache-dir \
+    && pip install --no-cache-dir \
+        fastapi==0.111.0 \
+        uvicorn==0.30.0 \
+        pydantic==2.7.0 \
+        google-generativeai==0.7.0 \
+        python-dotenv==1.0.0 \
+        requests \
+        sentencepiece \
+        accelerate \
+        transformers==4.41.0 \
+    && pip install --no-cache-dir \
+        torch==2.3.0 --index-url https://download.pytorch.org/whl/cpu
+
+# ── App source ─────────────────────────────────────────────────────────────────
+COPY app/ ./app/
+COPY download_model.py .
+
+# ── Startup script ─────────────────────────────────────────────────────────────
+# Downloads BART model on first boot if NOT already present in the volume.
+# On subsequent starts the volume already has the weights → skips download.
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
+EXPOSE 8000
+
+ENV HF_HOME=/cache/huggingface \
+    TRANSFORMERS_CACHE=/cache/huggingface/transformers \
+    # Silence progress bars in logs
+    TRANSFORMERS_VERBOSITY=error \
+    # Do not phone home
+    TRANSFORMERS_OFFLINE=0
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=90s --retries=6 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+ENTRYPOINT ["/docker-entrypoint.sh"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

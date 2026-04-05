@@ -1,0 +1,41 @@
+# ── Zero-Minute Dispatch — Frontend ───────────────────────────────────────────
+# Base: python:3.11-slim (~130 MB) — no ML, no build tools needed
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# ── System deps ────────────────────────────────────────────────────────────────
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Python deps ────────────────────────────────────────────────────────────────
+# --no-cache-dir keeps the layer tight. No torch, no transformers — just the
+# packages the Streamlit dashboard actually imports.
+RUN pip install --upgrade pip --no-cache-dir \
+    && pip install --no-cache-dir \
+        streamlit==1.35.0 \
+        streamlit-folium \
+        requests \
+        folium \
+        branca \
+        python-dotenv==1.0.0
+
+# ── App source ─────────────────────────────────────────────────────────────────
+COPY frontend/ ./frontend/
+
+EXPOSE 8501
+
+ENV STREAMLIT_BROWSER_GATHER_USAGE_STATS=false \
+    STREAMLIT_SERVER_HEADLESS=true \
+    STREAMLIT_SERVER_FILE_WATCHER_TYPE=none
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=4 \
+    CMD curl -f http://localhost:8501/_stcore/health || exit 1
+
+CMD ["streamlit", "run", "frontend/dashboard.py", \
+     "--server.port=8501", \
+     "--server.address=0.0.0.0", \
+     "--server.enableCORS=false", \
+     "--server.enableXsrfProtection=false"]
