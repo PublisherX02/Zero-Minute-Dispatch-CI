@@ -1,0 +1,87 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Zero-Minute Dispatch — Docker Compose
+#
+#  Services:
+#    backend   → FastAPI + Uvicorn  (port 8000)
+#    frontend  → Streamlit dashboard (port 8501)
+#
+#  Run:
+#    docker compose up --build           # first time (model download takes ~5 min)
+#    docker compose up                   # subsequent starts (uses cached layers)
+#    docker compose down                 # stop & remove containers
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── FastAPI backend ──────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: zmd-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Ensure the app finds the .env-sourced keys even if dotenv load order differs
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      GOOGLE_API_KEY_HOSPITAL: ${GOOGLE_API_KEY_HOSPITAL}
+      TOMTOM_API_KEY: ${TOMTOM_API_KEY}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      # HuggingFace model cache lives on the named volume, NOT in the image
+      HF_HOME: /cache/huggingface
+      TRANSFORMERS_CACHE: /cache/huggingface/transformers
+    volumes:
+      # Named volume — BART model downloaded here once, reused forever
+      - hf_cache:/cache/huggingface
+    ports:
+      - "8000:8000"
+    networks:
+      - zmd-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 90s   # allows time for first-boot model download
+      retries: 6
+
+  # ── Streamlit frontend ───────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: zmd-frontend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Point the dashboard at the backend service using the Docker DNS name
+      API_URL: http://backend:8000
+      TOMTOM_API_KEY: ${TOMTOM_API_KEY}
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+      STREAMLIT_SERVER_HEADLESS: "true"
+    ports:
+      - "8501:8501"
+    networks:
+      - zmd-net
+    depends_on:
+      backend:
+        condition: service_healthy   # wait until FastAPI /health returns 200
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 4
+
+# ─────────────────────────────────────────────────────────────────────────────
+networks:
+  zmd-net:
+    driver: bridge
+
+volumes:
+  # Named volume so the 1.6 GB BART model is not re-downloaded every build
+  hf_cache:
+    name: zmd-huggingface-cache

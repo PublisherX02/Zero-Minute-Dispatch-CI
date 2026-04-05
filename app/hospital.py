@@ -42,7 +42,21 @@ TUNISIA_HOSPITALS = [
         "available_bays": 2,
         "surgeons_on_call": ["Cardiologist", "General Surgeon"],
         "equipment": ["Defibrillator", "ECG", "Blood Bank"]
-    }
+    },
+    {"name": "Hôpital Régional de Bizerte",
+      "city": "Bizerte",
+        "lat": 37.2746,
+        "lon": 9.8739,
+        "specialties": ["trauma", "general"], 
+        "trauma_bays": 3, 
+        "available_bays": 2, 
+        "surgeons_on_call": ["Trauma Surgeon", "General Surgeon"], 
+        "equipment": ["Ventilator", "X-Ray", "Blood Bank"]
+        },
+    {"name": "Hôpital Farhat Hached", "city": "Sousse", "lat": 35.8245, "lon": 10.6346, "specialties": ["trauma", "cardiac", "neurology"], "trauma_bays": 4, "available_bays": 3, "surgeons_on_call": ["Trauma Surgeon", "Cardiologist", "Neurosurgeon"], "equipment": ["Ventilator", "CT Scanner", "Defibrillator", "Blood Bank"]},
+    {"name": "Hôpital Hédi Chaker", "city": "Sfax", "lat": 34.7406, "lon": 10.7603, "specialties": ["trauma", "burns", "orthopedic"], "trauma_bays": 4, "available_bays": 2, "surgeons_on_call": ["Trauma Surgeon", "Burns Specialist", "Orthopedic Surgeon"], "equipment": ["Ventilator", "X-Ray", "Blood Bank", "Burns Unit"]},
+    {"name": "Hôpital Mohamed Tahar Maamouri", "city": "Nabeul", "lat": 36.4561, "lon": 10.7376, "specialties": ["trauma", "general"], "trauma_bays": 2, "available_bays": 2, "surgeons_on_call": ["General Surgeon"], "equipment": ["Ventilator", "X-Ray"]},
+    {"name": "Hôpital Régional de Béja", "city": "Béja", "lat": 36.7256, "lon": 9.1817, "specialties": ["general", "trauma"], "trauma_bays": 2, "available_bays": 1, "surgeons_on_call": ["General Surgeon"], "equipment": ["X-Ray", "Blood Bank"]}
 ]
 
 
