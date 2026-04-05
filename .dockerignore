@@ -40,7 +40,10 @@ NOTES.md
 *.mp3
 *.mp4
 *.log
+
+# Allow requirements for build, but ignore other .txt
 *.txt
+!requirements.txt
 apicode.txt
 
 # Temp files
