@@ -2,22 +2,6 @@ from enum import Enum
 from typing import List, Optional
 from pydantic import BaseModel, field_validator
 
-class HospitalAlert(BaseModel):
-    name: str = "Unknown"
-    city: str = "Unknown"
-    distance_km: float = 0.0
-    available_bays: int = 0
-    surgeons_on_call: List[str] = []
-    equipment: List[str] = []
-    eta_minutes: int = 0
-    preparation_instructions: Optional[str] = None
-
-class PriorityQueue(BaseModel):
-    queue_position: int = 1
-    total_active_incidents: int = 1
-    ambulances_available: int = 3
-    priority_reason: str = "Single incident"
-
 
 class PriorityLevel(str, Enum):
     CODE_RED = "CODE_RED"
@@ -68,6 +52,32 @@ class ScamAssessment(BaseModel):
         return v
 
 
+class TrafficRoute(BaseModel):
+    travel_time_minutes: int = 0
+    distance_km: float = 0.0
+    traffic_condition: str = "Calculating..."
+    traffic_delay_minutes: int = 0
+
+
+class HospitalAlert(BaseModel):
+    name: str = "Unknown"
+    city: str = "Unknown"
+    distance_km: float = 0.0
+    available_bays: int = 0
+    surgeons_on_call: List[str] = []
+    equipment: List[str] = []
+    eta_minutes: int = 0
+    preparation_instructions: Optional[str] = None
+    traffic_route: TrafficRoute = TrafficRoute()
+
+
+class PriorityQueue(BaseModel):
+    queue_position: int = 1
+    total_active_incidents: int = 1
+    ambulances_available: int = 3
+    priority_reason: str = "Single incident"
+
+
 class TriageReport(BaseModel):
     incident_metadata: IncidentMetadata
     extracted_medical_entities: ExtractedMedicalEntities
@@ -83,19 +93,3 @@ class TriageReport(BaseModel):
             self.requires_human_verification = True
         if self.scam_assessment.final_scam_probability > 0.7:
             self.requires_human_verification = True
-
-class HospitalAlert(BaseModel):
-    name: str = "Unknown"
-    city: str = "Unknown"
-    distance_km: float = 0.0
-    available_bays: int = 0
-    surgeons_on_call: List[str] = []
-    equipment: List[str] = []
-    eta_minutes: int = 0
-    preparation_instructions: Optional[str] = None
-
-class PriorityQueue(BaseModel):
-    queue_position: int = 1
-    total_active_incidents: int = 1
-    ambulances_available: int = 3
-    priority_reason: str = "Single incident"

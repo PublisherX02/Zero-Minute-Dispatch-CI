@@ -1,19 +1,25 @@
 import sys
 import os
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'), override=True)
+
 from transformers import pipeline as hf_pipeline
 import google.generativeai as genai
 import json
 import time
-from dotenv import load_dotenv
-from app.models import TriageReport, ScamAssessment, IncidentMetadata, ExtractedMedicalEntities, DispatchRecommendation
 import requests
-load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
+
+from app.models import (
+    TriageReport, ScamAssessment, IncidentMetadata, 
+    ExtractedMedicalEntities, DispatchRecommendation, 
+    HospitalAlert, PriorityQueue, TrafficRoute
+)
 from app.hospital import find_best_hospital
+
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-from app.models import TriageReport, ScamAssessment, IncidentMetadata, ExtractedMedicalEntities, DispatchRecommendation, HospitalAlert
-dotenv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
-load_dotenv(dotenv_path=dotenv_path, override=True)
 
 SYSTEM_PROMPT = """
 You are a medical triage AI assistant for emergency services.
@@ -63,6 +69,9 @@ Rules:
 - nearest_hospital, nearest_fire_station, nearest_hydrant: always null (populated by routing layer)
 - respiratory_estimate: analyze chest rise/fall patterns visible in video to estimate breathing rate (e.g. "Rapid ~24 breaths/min", "Shallow/Irregular", "No visible chest movement — apnea suspected")
 - If patient is visible and video is long enough, attempt to estimate heart rate from subtle chest/neck pulse movements. Add as "cardiac_estimate" field if detectable, otherwise "Not detectable from video"
+- gemini_scam_score: any laughter, giggling, inappropriate tone, or non-distressed caller MUST score above 0.7
+- If caller laughs at ANY point during the call, score 0.85 minimum
+- scam_indicators: list ALL suspicious behaviors observed
 """
 
 # Initialize once at module level
@@ -91,14 +100,131 @@ def detect_scam_nlp(transcript: str) -> float:
 
     return round(min(scam_score, 1.0), 3)
 
-def generate_hospital_alert(report: TriageReport) -> dict:
+def geocode_location(location_text: str):
+    """Convert a location string to (lat, lon) using Nominatim. Returns (None, None) on failure."""
+    try:
+        url = "https://nominatim.openstreetmap.org/search"
+        params = {"q": location_text + " Tunisia", "format": "json", "limit": 1}
+        headers = {"User-Agent": "ZeroMinuteDispatch/1.0"}
+        r = requests.get(url, params=params, headers=headers, timeout=5)
+        results = r.json()
+        if results:
+            return float(results[0]["lat"]), float(results[0]["lon"])
+    except Exception:
+        pass
+    return None, None
+
+
+# Default origin: Tunis city centre (used when no incident location is provided)
+TUNIS_CENTER_LAT = 36.8060
+TUNIS_CENTER_LON = 10.1400
+
+
+def _post_process_triage(report: TriageReport, location: str = None) -> TriageReport:
     """
-    Finds best hospital and generates prep instructions via Gemini
+    Shared post-processing pipeline for both streaming and non-streaming paths.
+    Handles scam exit, NLP scoring, geocoding, hospital alert, and priority queue.
     """
+    # EARLY SCAM EXIT — no NLP or routing needed
+    if report.scam_assessment.gemini_scam_score >= 0.95:
+        return TriageReport(
+            incident_metadata=IncidentMetadata(
+                priority_level="CODE_GREEN",
+                confidence_score=1.0,
+                estimated_victims=0,
+                location_description="TRACE REQUIRED"
+            ),
+            extracted_medical_entities=ExtractedMedicalEntities(
+                suspected_primary_condition="SCAM CALL DETECTED - DO NOT DISPATCH",
+                respiratory_estimate="N/A",
+                consciousness_level="N/A"
+            ),
+            environmental_hazards=[],
+            dispatch_recommendation=DispatchRecommendation(
+                required_specialists=["Law Enforcement - False Alarm Protocol"],
+                equipment_loadout=[]
+            ),
+            scam_assessment=ScamAssessment(
+                gemini_scam_score=report.scam_assessment.gemini_scam_score,
+                nlp_scam_score=0.0,
+                final_scam_probability=report.scam_assessment.gemini_scam_score,
+                is_suspected_scam=True,
+                scam_indicators=report.scam_assessment.scam_indicators
+            ),
+            requires_human_verification=True
+        )
+
+    # Genuine call — NLP scam cross-check
+    transcript = report.incident_metadata.location_description or ""
+    nlp_score = detect_scam_nlp(transcript)
+    report.scam_assessment.nlp_scam_score = nlp_score
+    report.scam_assessment.final_scam_probability = round(
+        (report.scam_assessment.gemini_scam_score + nlp_score) / 2, 3
+    )
+    report.scam_assessment.is_suspected_scam = (
+        report.scam_assessment.final_scam_probability > 0.6
+        or report.scam_assessment.gemini_scam_score >= 0.75
+    )
+
+    report.check_verification_needed()
+
+    # Resolve incident coordinates from the caller's location string
+    origin_lat, origin_lon = TUNIS_CENTER_LAT, TUNIS_CENTER_LON
+    if location:
+        lat, lon = geocode_location(location)
+        if lat and lon:
+            origin_lat, origin_lon = lat, lon
+
+    # Generate hospital alert for genuine emergencies
+    if not report.scam_assessment.is_suspected_scam and \
+       report.incident_metadata.priority_level.value in ["CODE_RED", "CODE_ORANGE"]:
+        hospital_data = generate_hospital_alert(
+            report, origin_lat=origin_lat, origin_lon=origin_lon
+        )
+        report.hospital_alert = HospitalAlert(
+            name=hospital_data["name"],
+            city=hospital_data["city"],
+            distance_km=hospital_data["distance_km"],
+            available_bays=hospital_data["available_bays"],
+            surgeons_on_call=hospital_data["surgeons_on_call"],
+            equipment=hospital_data["equipment"],
+            eta_minutes=hospital_data["eta_minutes"],
+            preparation_instructions=hospital_data.get("preparation_instructions"),
+        )
+
+    # Priority queue
+    report.priority_queue = PriorityQueue(
+        queue_position=1,
+        total_active_incidents=1,
+        ambulances_available=3,
+        priority_reason=f"{report.incident_metadata.priority_level} — immediate dispatch"
+    )
+    return report
+
+
+def generate_hospital_alert(report: TriageReport, origin_lat: float = TUNIS_CENTER_LAT, origin_lon: float = TUNIS_CENTER_LON) -> dict:
     injury = report.extracted_medical_entities.suspected_primary_condition or "General trauma"
+
+    # Find nearest specialised hospital from the incident location
+    hospital = find_best_hospital(injury_type=injury, location_lat=origin_lat, location_lon=origin_lon)
+
+    # Get real-time traffic route from incident scene to hospital
+    traffic = get_traffic_route(
+        origin_lat=origin_lat,
+        origin_lon=origin_lon,
+        dest_lat=hospital["lat"],
+        dest_lon=hospital["lon"]
+    )
     
-    # Find best hospital from mock database
-    hospital = find_best_hospital(injury_type=injury)
+    # Update ETA with real traffic data
+    if traffic["travel_time_minutes"] > 0:
+        hospital["eta_minutes"] = traffic["travel_time_minutes"]
+        hospital["distance_km"] = traffic["distance_km"]
+    
+    second_key = os.getenv("GOOGLE_API_KEY_HOSPITAL")
+    hospital_genai = genai
+    hospital_genai.configure(api_key=second_key)
+    model = hospital_genai.GenerativeModel("gemini-2.5-flash")
     
     # Generate preparation instructions via Gemini
     model = genai.GenerativeModel("gemini-2.5-flash")
@@ -111,20 +237,22 @@ def generate_hospital_alert(report: TriageReport) -> dict:
     - Respiratory: {report.extracted_medical_entities.respiratory_estimate}
     - Priority: {report.incident_metadata.priority_level}
     - ETA: {hospital['eta_minutes']} minutes
+    - Traffic: {traffic['traffic_condition']}
     
     Write a brief 2-sentence hospital preparation instruction.
     Be specific and medical. No fluff.
     """
     
     response = model.generate_content(prompt)
-    
+    genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
     return {
         **hospital,
-        "preparation_instructions": response.text.strip()
+        "preparation_instructions": response.text.strip(),
+        "traffic_route": traffic
     }
 
 
-def analyze_emergency_scene(video_path: str) -> TriageReport:
+def analyze_emergency_scene(video_path: str, location: str = None) -> TriageReport:
     model = genai.GenerativeModel("gemini-2.5-flash")
 
     print("Uploading video to Gemini...")
@@ -160,67 +288,59 @@ def analyze_emergency_scene(video_path: str) -> TriageReport:
 
     raw_json = json.loads(raw_text)
     report = TriageReport(**raw_json)
+    return _post_process_triage(report, location)
 
-    # EARLY SCAM EXIT
-    if report.scam_assessment.gemini_scam_score >= 0.95:
-        return TriageReport(
-            incident_metadata=IncidentMetadata(
-                priority_level="CODE_GREEN",
-                confidence_score=1.0,
-                estimated_victims=0,
-                location_description="TRACE REQUIRED"
-            ),
-            extracted_medical_entities=ExtractedMedicalEntities(
-                suspected_primary_condition="SCAM CALL DETECTED - DO NOT DISPATCH",
-                respiratory_estimate="N/A",
-                consciousness_level="N/A"
-            ),
-            environmental_hazards=[],
-            dispatch_recommendation=DispatchRecommendation(
-                required_specialists=["Law Enforcement - False Alarm Protocol"],
-                equipment_loadout=[]
-            ),
-            scam_assessment=ScamAssessment(
-                gemini_scam_score=report.scam_assessment.gemini_scam_score,
-                nlp_scam_score=0.0,
-                final_scam_probability=report.scam_assessment.gemini_scam_score,
-                is_suspected_scam=True,
-                scam_indicators=report.scam_assessment.scam_indicators
-            ),
-            requires_human_verification=True
-        )
 
-    # Genuine call — run NLP scam detector
-    transcript = report.incident_metadata.location_description or ""
-    nlp_score = detect_scam_nlp(transcript)
+def analyze_emergency_scene_stream(video_path: str, location: str = None):
+    """
+    Streaming version — yields raw text chunks as Gemini generates them,
+    then yields a final dict containing the fully post-processed TriageReport.
+    Consumers should check: if isinstance(item, dict) → final report, else → text chunk.
+    """
+    model = genai.GenerativeModel("gemini-2.5-flash")
 
-    report.scam_assessment.nlp_scam_score = nlp_score
-    report.scam_assessment.final_scam_probability = round(
-        (report.scam_assessment.gemini_scam_score + nlp_score) / 2, 3
-    )
-    report.scam_assessment.is_suspected_scam = (
-        report.scam_assessment.final_scam_probability > 0.7
+    print("Uploading video to Gemini...")
+    video_file = genai.upload_file(video_path)
+
+    print("Waiting for file to process...")
+    while video_file.state.name == "PROCESSING":
+        time.sleep(2)
+        video_file = genai.get_file(video_file.name)
+
+    if video_file.state.name == "FAILED":
+        raise ValueError("Video processing failed")
+
+    print("Streaming analysis...")
+    response = model.generate_content(
+        [video_file, SYSTEM_PROMPT],
+        generation_config=genai.GenerationConfig(
+            temperature=0.0,
+            max_output_tokens=2048,
+        ),
+        stream=True
     )
 
-    report.check_verification_needed()
-    # Generate hospital alert for genuine emergencies
-    if not report.scam_assessment.is_suspected_scam and \
-       report.incident_metadata.priority_level.value in ["CODE_RED", "CODE_ORANGE"]:
-        
-        hospital_data = generate_hospital_alert(report)
-        report.hospital_alert = HospitalAlert(**hospital_data)
+    full_text = ""
+    for chunk in response:
+        if chunk.text:
+            full_text += chunk.text
+            yield chunk.text
 
-    # Priority queue — simple mock
-    from app.models import PriorityQueue
-    report.priority_queue = PriorityQueue(
-        queue_position=1,
-        total_active_incidents=1,
-        ambulances_available=3,
-        priority_reason=f"{report.incident_metadata.priority_level} — immediate dispatch"
-    )
-    return report
+    # Clean markdown fences if present
+    raw_text = full_text.strip()
+    if raw_text.startswith("```"):
+        raw_text = raw_text.split("```")[1]
+        if raw_text.startswith("json"):
+            raw_text = raw_text[4:]
+        raw_text = raw_text.strip()
 
+    print(f"Gemini stream complete — post-processing...")
+    raw_json = json.loads(raw_text)
+    report = TriageReport(**raw_json)
+    report = _post_process_triage(report, location)
 
+    # Final yield: fully processed report as a dict (signals completion to caller)
+    yield report.model_dump()
 
 
 def get_nearest_hospital(location: str, injury_type: str) -> dict:
@@ -257,3 +377,50 @@ def get_nearest_hospital(location: str, injury_type: str) -> dict:
             "lon": hospital.get("lon")
         }
     return {"name": "Nearest Hospital", "address": "Unable to locate"}
+
+def get_traffic_route(origin_lat: float, origin_lon: float, 
+                       dest_lat: float, dest_lon: float) -> dict:
+    """
+    Gets real-time traffic routing from TomTom API
+    """
+    tomtom_key = os.getenv("TOMTOM_API_KEY")
+    
+    url = f"https://api.tomtom.com/routing/1/calculateRoute/{origin_lat},{origin_lon}:{dest_lat},{dest_lon}/json"
+    
+    params = {
+        "key": tomtom_key,
+        "traffic": "true",
+        "travelMode": "car",
+        "routeType": "fastest"
+    }
+    
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        route = data["routes"][0]["summary"]
+        travel_minutes = round(route["travelTimeInSeconds"] / 60)
+        distance_km = round(route["lengthInMeters"] / 1000, 1)
+        traffic_delay = round(route.get("trafficDelayInSeconds", 0) / 60)
+        
+        if traffic_delay > 5:
+            condition = f"Heavy traffic — {traffic_delay} min delay"
+        elif traffic_delay > 2:
+            condition = f"Moderate traffic — {traffic_delay} min delay"
+        else:
+            condition = "Clear — optimal route"
+            
+        return {
+            "travel_time_minutes": travel_minutes,
+            "distance_km": distance_km,
+            "traffic_condition": condition,
+            "traffic_delay_minutes": traffic_delay
+        }
+    except Exception as e:
+        print(f"TomTom error: {e}")
+        return {
+            "travel_time_minutes": 0,
+            "distance_km": 0,
+            "traffic_condition": "Traffic data unavailable",
+            "traffic_delay_minutes": 0
+        }
