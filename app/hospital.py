@@ -46,7 +46,7 @@ TUNISIA_HOSPITALS = [
 ]
 
 
-def find_best_hospital(injury_type: str, location_lat: float = 36.8065, location_lon: float = 10.1815) -> dict:
+def find_best_hospital(injury_type: str, location_lat: float = 36.8190, location_lon: float = 10.1660) -> dict:
     """
     Matches injury type to best available hospital
     Returns the most suitable hospital based on specialty and availability
@@ -92,9 +92,11 @@ def find_best_hospital(injury_type: str, location_lat: float = 36.8065, location
     return {
         "name": best["name"],
         "city": best["city"],
+        "lat": best["lat"],
+        "lon": best["lon"],
         "distance_km": round(dist, 1),
         "available_bays": best["available_bays"],
         "surgeons_on_call": best["surgeons_on_call"],
         "equipment": best["equipment"],
-        "eta_minutes": round(dist * 2.5)
+        "eta_minutes": round(dist * 2.5),
     }
