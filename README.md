@@ -1,5 +1,6 @@
 # Zero-Minute Dispatch
 [![Zero-Minute Dispatch CI](https://github.com/PublisherX02/Zero-Minute-Dispatch-CI/actions/workflows/ci.yml/badge.svg)](https://github.com/PublisherX02/Zero-Minute-Dispatch-CI/actions/workflows/ci.yml)
+[![Auto Pull Request to Main](https://github.com/PublisherX02/Zero-Minute-Dispatch-CI/actions/workflows/cd.yml/badge.svg)](https://github.com/PublisherX02/Zero-Minute-Dispatch-CI/actions/workflows/cd.yml)
 
 > **Eliminating the "Blind Arrival" in Emergency Medical Response**
 
