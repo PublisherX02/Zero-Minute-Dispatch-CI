@@ -2,12 +2,32 @@
 [![Zero-Minute Dispatch CI](https://github.com/PublisherX02/Zero-Minute-Dispatch-CI/actions/workflows/ci.yml/badge.svg)](https://github.com/PublisherX02/Zero-Minute-Dispatch-CI/actions/workflows/ci.yml)
 [![Auto Pull Request to Main](https://github.com/PublisherX02/Zero-Minute-Dispatch-CI/actions/workflows/cd.yml/badge.svg)](https://github.com/PublisherX02/Zero-Minute-Dispatch-CI/actions/workflows/cd.yml)
 
+# Zero-Minute Dispatch
+[![Zero-Minute Dispatch CI](https://github.com/PublisherX02/Zero-Minute-Dispatch-CI/actions/workflows/ci.yml/badge.svg)](https://github.com/PublisherX02/Zero-Minute-Dispatch-CI/actions/workflows/ci.yml)
+[![Auto Pull Request to Main](https://github.com/PublisherX02/Zero-Minute-Dispatch-CI/actions/workflows/cd.yml/badge.svg)](https://github.com/PublisherX02/Zero-Minute-Dispatch-CI/actions/workflows/cd.yml)
+
 > **Eliminating the "Blind Arrival" in Emergency Medical Response**
 
 Built for **Humanovators 2.0 Hackathon** — Theme: Smart Mobility for Healthcare  
 Challenge Area: Dynamic Vehicle Routing for Emergency Medical Services (EMS)
 
-> Validated through direct field interviews with Civil Protection Officials and Emergency Medical Doctors — Tunisia, April 2026
+> 🏆 **1st Place Winner — Humanovators 2.0 Hackathon, April 2026**  
+> Ranked 1st across all three judging dimensions against 13+ competing teams.
+
+> Validated through direct field interviews with Civil Protection Officials — Tunisia, April 2026
+
+---
+
+## Recognition
+
+**Zero-Minute Dispatch won first place at Humanovators 2.0** (April 2026), Tunisia's Smart Mobility for Healthcare hackathon, competing against 13+ teams across all challenge areas.
+
+The project ranked first in every judging dimension:
+- **Technical Implementation** — multimodal AI pipeline, real-time streaming, containerized deployment
+- **Field Validation** — direct Civil Protection engagement, feature requests from active-duty officers
+- **Impact & Scalability** — concrete national deployment pathway with government partnership
+
+Civil Protection officers who validated the project during field research have expressed interest in continued collaboration toward a national pilot deployment.
 
 ---
 
@@ -25,14 +45,14 @@ Paramedic crew (no structured data)
 BLIND ARRIVAL — wrong equipment, wrong specialists, wasted Golden Hour minutes
 ```
 
-Field interviews identified four specific gaps:
+Field interviews with Civil Protection officers identified four specific gaps:
 
 | Gap | Current Reality | Impact |
 |---|---|---|
 | Victim count | Dispatcher estimate only | Wrong resources dispatched |
 | Injury type | Verbal description | Wrong equipment loaded |
-| False calls | No validation | ~15% of dispatches wasted |
-| Hospital readiness | No pre-alert | ER unprepared on arrival |
+| False calls | No validation protocol | ~15% of dispatches wasted |
+| Hospital readiness | No pre-alert sent | ER unprepared on arrival |
 
 ---
 
@@ -213,8 +233,6 @@ gemini_scam_score  +  nlp_scam_score
      OR gemini_scam_score ≥ 0.75
 ```
 
-**Why two thresholds?** The OR condition catches cases where Gemini is highly confident (e.g., caller is laughing — score 0.85) but the transcript is short, making the NLP score near 0 due to insufficient text. Without the OR, the average would stay below 0.6 and the scam would slip through.
-
 ### Stage 4 — Pydantic Validation
 
 Every Gemini output passes through Pydantic v2 model validation before any downstream processing. This enforces:
@@ -224,42 +242,18 @@ Every Gemini output passes through Pydantic v2 model validation before any downs
 - `priority_level` is one of `CODE_RED | CODE_ORANGE | CODE_GREEN` (enum)
 - `requires_human_verification` is automatically set to `True` if `confidence_score < 0.85` or `final_scam_probability > 0.7`
 
-Any malformed output from Gemini raises a `ValidationError` and is rejected before reaching the dashboard.
-
 ### Stage 5 — Hospital Routing
 
 For genuine `CODE_RED` and `CODE_ORANGE` incidents, the pipeline:
 
 1. **Specialty matching** — maps injury type (cardiac, neuro, burn, orthopedic, trauma) to the hospital with the matching specialty that has available bays
 2. **Distance calculation** — Haversine formula from incident coordinates to each candidate hospital
-3. **Real-time ETA** — TomTom Routing API with live traffic data; `travelTimeInSeconds` and `trafficDelayInSeconds` populate the hospital alert
-4. **Preparation instructions** — a second Gemini call generates a 2-sentence briefing for the receiving ER staff based on condition, vitals, priority, and ETA
-
-```
-injury_type
-    ↓
-find_best_hospital()
-    ├─ match specialty (cardiac / neuro / burns / ortho / trauma)
-    ├─ filter available_bays > 0
-    └─ sort by Haversine distance from incident lat/lon
-           ↓
-    best hospital selected
-           ↓
-get_traffic_route()  (TomTom API)
-    ├─ real road travel time
-    ├─ traffic delay in minutes
-    └─ condition label (Clear / Moderate / Heavy)
-           ↓
-Gemini: generate preparation_instructions
-           ↓
-HospitalAlert populated
-```
+3. **Real-time ETA** — TomTom Routing API with live traffic data
+4. **Preparation instructions** — a second Gemini call generates a 2-sentence briefing for the receiving ER staff
 
 ---
 
 ## Data Models
-
-All inter-component data is typed and validated by Pydantic v2. The full schema:
 
 ```
 TriageReport
@@ -271,17 +265,14 @@ TriageReport
 │
 ├── ExtractedMedicalEntities
 │   ├── suspected_primary_condition: str
-│   ├── respiratory_estimate: str   (e.g. "Rapid ~24 breaths/min")
+│   ├── respiratory_estimate: str
 │   └── consciousness_level: str
 │
 ├── environmental_hazards: List[str]
 │
 ├── DispatchRecommendation
 │   ├── required_specialists: List[str]
-│   ├── equipment_loadout: List[str]
-│   ├── nearest_hospital: null   (populated by routing layer)
-│   ├── nearest_fire_station: null
-│   └── nearest_hydrant: null
+│   └── equipment_loadout: List[str]
 │
 ├── ScamAssessment
 │   ├── gemini_scam_score: float
@@ -291,23 +282,15 @@ TriageReport
 │   └── scam_indicators: List[str]
 │
 ├── HospitalAlert
-│   ├── name: str
-│   ├── city: str
-│   ├── distance_km: float
-│   ├── available_bays: int
+│   ├── name, city, distance_km, available_bays
 │   ├── surgeons_on_call: List[str]
 │   ├── equipment: List[str]
 │   ├── eta_minutes: int
 │   ├── preparation_instructions: str
 │   └── traffic_route: TrafficRoute
-│       ├── travel_time_minutes: int
-│       ├── distance_km: float
-│       ├── traffic_condition: str
-│       └── traffic_delay_minutes: int
 │
 ├── PriorityQueue
 │   ├── queue_position: int
-│   ├── total_active_incidents: int
 │   ├── ambulances_available: int
 │   └── priority_reason: str
 │
@@ -316,210 +299,63 @@ TriageReport
 
 ---
 
-## Ambulance Dispatch Simulation
-
-The operations dashboard maintains a live dispatch map powered by Folium on a CartoDB dark basemap. When a genuine incident is processed:
-
-```
-Incident confirmed (CODE_RED or CODE_ORANGE)
-        ↓
-dashboard_geocode(location_input)   ← Nominatim OSM
-        ↓
-get_tomtom_route_points(HQ → incident)   ← TomTom leg 1
-get_tomtom_route_points(incident → hospital)   ← TomTom leg 2
-        ↓
-route_points = leg1 + leg2[1:]   ← single continuous road path
-mid_idx = len(leg1) - 1          ← scene arrival index
-        ↓
-Ambulance entry stored in session_state:
-  route_points: List[[lat, lon]]  (real road geometry)
-  mid_idx: int                    (where ambulance reaches scene)
-  step: int                       (current position index)
-  total_steps: int
-  status: EN_ROUTE → AT_SCENE → TO_HOSPITAL → ARRIVED
-```
-
-**SIMULATE DISPATCH** advances each active ambulance by 8% of its total route per click (`advance = max(1, int(total_steps * 0.08))`), status transitions driven by `mid_idx`.
-
-Map markers use `components.html(m._repr_html_())` rather than `st_folium()` to avoid Streamlit's JSON serialization of Folium's Jinja2 template objects. This enables full use of `folium.DivIcon`, `folium.Element`, and styled tooltips.
-
----
-
 ## Operations Dashboard
 
-The dashboard is a single-page Streamlit application with a three-column layout:
+Three-column Streamlit ops room:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  NAVBAR: brand · active/today/scam counters · LIVE indicator    │
 │  TICKER: scrolling real-time incident feed                      │
 ├─────────────────┬───────────────────────────┬───────────────────┤
-│  LEFT COLUMN    │     MIDDLE COLUMN         │  RIGHT COLUMN     │
-│                 │                           │                   │
-│  Incident Log   │  Scene Recording upload   │  Hospital         │
-│  (real-time)    │  Location input           │  Resources        │
-│                 │  ANALYZE button           │                   │
-│  - Priority     │                           │  - Charles Nicolle│
-│    badge        │  ── DISPATCH MAP ──       │  - Habib Thameur  │
-│  - Condition    │  Dark Folium map          │  - Militaire      │
-│  - Location     │  HQ ★ marker              │  - Les Oliviers   │
-│  - Time         │  Hospital ✚ markers       │                   │
-│  - Hospital     │  Incident ● circles       │  Each card shows: │
-│                 │  Ambulance cards + routes │  - bays / surgeons│
-│                 │  In-map legend            │  - ambulances     │
-│                 │  SIMULATE DISPATCH btn    │  - status         │
-│                 │                           │                   │
-│                 │  ── TRIAGE REPORT ──      │                   │
-│                 │  Priority banner          │                   │
-│                 │  Medical entities         │                   │
-│                 │  Scam assessment          │                   │
-│                 │  Hospital alert           │                   │
-│                 │  Dispatch recommendation  │                   │
-│                 │  Human verification flag  │                   │
+│  Incident Log   │  Upload + Analyze         │  Hospital         │
+│  (real-time)    │  Dispatch Map (Folium)    │  Resources        │
+│                 │  Triage Report            │  (live depletion) │
 └─────────────────┴───────────────────────────┴───────────────────┘
-```
-
-When the Analyze button is pressed, the dashboard opens a streaming SSE connection to `/analyze/stream`. A live monospace terminal in the middle column displays raw Gemini JSON as it generates. When `[DONE]` arrives, the terminal clears and the full structured report renders.
-
----
-
-## API Reference
-
-### `POST /analyze/stream`
-
-Streaming endpoint. Returns Server-Sent Events.
-
-| Field | Type | Description |
-|---|---|---|
-| `file` | multipart file | Video (mp4, webm, mpeg4) or audio (mp3, wav, m4a, ogg) |
-| `location` | Form string (optional) | Incident location text for geocoding |
-
-**Response stream:**
-```
-data: {"incident_metadata": ...   ← raw Gemini text chunk (partial JSON)
-data: "priority_level": "CODE_   ← next chunk
-...
-data: [DONE]{"incident_metadata": {...}, "hospital_alert": {...}, ...}
-```
-
-The `[DONE]` prefix signals the final, fully post-processed `TriageReport` JSON. All preceding `data:` lines are raw Gemini generation chunks for live display only.
-
-### `POST /analyze`
-
-Synchronous endpoint. Returns the same `TriageReport` JSON in a single response after the full pipeline completes.
-
-### `GET /health`
-
-```json
-{"status": "operational", "system": "Zero-Minute Dispatch"}
 ```
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology | Purpose |
-|---|---|---|
-| Multimodal AI | Gemini 2.5 Flash | Video + audio analysis in one API call, streaming generation |
-| NLP Scam Detection | facebook/bart-large-mnli | Zero-shot classification, independent of Gemini |
-| Backend | FastAPI + Pydantic v2 | Async SSE streaming, schema enforcement |
-| Frontend | Streamlit | Operations room dashboard |
-| Map | Folium + CartoDB dark | Ambulance dispatch visualization on real basemap |
-| Routing | TomTom Routing API | Real-time road ETA with traffic data |
-| Geocoding | Nominatim (OpenStreetMap) | Location text → coordinates |
-| CI/CD | GitHub Actions | Test on push to main/dev, PR auto-creation dev → main |
-
----
-
-## Project Structure
-
-```
-Zero-Minute-Dispatch/
-│
-├── app/
-│   ├── main.py              FastAPI application
-│   │                        /analyze/stream  — SSE streaming endpoint
-│   │                        /analyze         — synchronous endpoint
-│   │                        /health          — liveness check
-│   │
-│   ├── pipeline.py          Core AI pipeline
-│   │                        analyze_emergency_scene_stream() — yields SSE chunks then final dict
-│   │                        analyze_emergency_scene()        — synchronous wrapper
-│   │                        _post_process_triage()           — shared post-processing (NLP, routing)
-│   │                        generate_hospital_alert()        — TomTom + Gemini hospital prep
-│   │                        detect_scam_nlp()                — BART zero-shot classification
-│   │                        geocode_location()               — Nominatim geocoding
-│   │
-│   ├── models.py            Pydantic v2 schema
-│   │                        TriageReport, IncidentMetadata, ExtractedMedicalEntities
-│   │                        ScamAssessment, HospitalAlert, TrafficRoute, PriorityQueue
-│   │
-│   └── hospital.py          Hospital registry for Tunisia
-│                            find_best_hospital() — specialty match + Haversine distance sort
-│
-├── frontend/
-│   └── dashboard.py         Streamlit operations dashboard
-│                            Three-column ops room layout
-│                            SSE streaming consumer with live terminal
-│                            Folium dark map with real TomTom road geometry
-│                            Ambulance dispatch simulation (8% per step)
-│
-├── tests/
-│   └── test_schema.py       Pydantic validation tests
-│                            valid report, invalid confidence score, verification flag
-│
-├── .github/
-│   └── workflows/
-│       ├── ci.yml           Run pytest on push to main/dev
-│       └── cd.yml           Auto PR: dev → main
-│
-├── .env.example             GOOGLE_API_KEY, TOMTOM_API_KEY
-├── requirements.txt
-└── README.md
-```
+| Layer | Technology |
+|---|---|
+| Multimodal AI | Gemini 2.5 Flash |
+| NLP Scam Detection | facebook/bart-large-mnli |
+| Backend | FastAPI + Pydantic v2 |
+| Frontend | Streamlit |
+| Map | Folium + CartoDB dark |
+| Routing | TomTom Routing API |
+| Geocoding | Nominatim (OpenStreetMap) |
+| CI/CD | GitHub Actions |
+| Containers | Docker + docker-compose |
 
 ---
 
 ## Quick Start
 
-### Prerequisites
-
-- Python 3.10+
-- [Google AI Studio API key](https://aistudio.google.com) (free)
-- [TomTom Developer API key](https://developer.tomtom.com) (free tier)
-
-### Installation
-
 ```bash
-git clone https://github.com/PublisherX02/Zero-Minute-Dispatch.git
-cd Zero-Minute-Dispatch
+git clone https://github.com/PublisherX02/Zero-Minute-Dispatch-CI.git
+cd Zero-Minute-Dispatch-CI
 
 python -m venv venv
 venv\Scripts\activate      # Windows
 source venv/bin/activate   # Linux / Mac
 
 pip install -r requirements.txt
-
-# Pre-download the BART model (avoids cold-start delay on first analysis)
 python download_models.py
 
 cp .env.example .env
-# Edit .env — add GOOGLE_API_KEY and TOMTOM_API_KEY
+# Add GOOGLE_API_KEY and TOMTOM_API_KEY
 ```
-
-### Running
 
 ```bash
-# Terminal 1 — API server
+# Terminal 1
 uvicorn app.main:app --reload
 
-# Terminal 2 — Dashboard
+# Terminal 2
 streamlit run frontend/dashboard.py
 ```
-
-Open `http://localhost:8501`.
-
-### Testing
 
 ```bash
 pytest tests/ -v
@@ -529,51 +365,74 @@ pytest tests/ -v
 
 ## Roadmap
 
-### Phase 1 — MVP (Current)
+### Phase 1 — MVP ✅ Complete
 
-- Multimodal video and audio scene analysis via Gemini 2.5 Flash
-- Streaming SSE pipeline with live terminal output in the ops room
+- Multimodal video and audio scene analysis
+- Streaming SSE pipeline with live terminal output
 - Ensemble scam detection: Gemini + BART-large-mnli
-- Pydantic v2 schema enforcement with human verification flagging
-- Hospital specialty matching with real-time TomTom traffic ETA
+- Hospital specialty matching with TomTom real-time ETA
 - Gemini-generated ER preparation instructions
-- Folium operations map: real TomTom road geometry for ambulance routes
-- Ambulance dispatch simulation with 8%-per-step progress tracking
-- Civil Protection ops room dashboard: dark theme, live incident log, hospital resource tracker
+- Live operations dashboard with ambulance dispatch simulation
+- CI/CD pipeline + Docker containerization
 
-### Phase 2 — Scale (Pending Governmental Authorization)
+### Phase 2 — National Deployment
 
-- Municipal CCTV network integration for passive incident detection
-- Automatic triage without caller reporting (camera-triggered)
-- YOLOv8 victim counting from fixed camera feeds
+- Mobile application for Civil Protection dispatchers
+- National distribution through Civil Protection channels and radio stations
 - GPS location capture via SMS link to caller
-
-### Phase 3 — Intelligence
-
-- XGBoost / LSTM predictive heatmaps for pre-positioning
 - Tunisian Derja dialect NLP integration
 - CAD system integration via standard JSON schema
-- Multi-incident priority arbitration
+
+### Phase 3 — Autonomous Detection *(pending governmental authorization)*
+
+- Municipal CCTV network integration for passive incident detection
+- Automatic triage without caller reporting — camera-triggered on accident detection only
+- YOLOv8 victim counting from fixed camera feeds
+- No mass surveillance — AI triggers exclusively on accident or human risk detection
+- No continuous recording, no facial recognition, no behavioral tracking
+
+### Phase 4 — Predictive Intelligence
+
+- XGBoost / LSTM predictive heatmaps trained on historical accident data, weather, traffic, and tourist influx
+- Pre-positioning of ambulances in high-risk zones before emergencies occur
+- Multi-incident priority arbitration across regional networks
 
 ---
 
 ## Field Validation
 
-Validated through direct interviews with:
+Validated through direct field interviews with **Civil Protection Officials** at the Civil Protection Operations Center, Tunisia — April 2026.
 
-- **Civil Protection Officials** — confirmed the Blind Arrival operational gap; explicitly requested the scam detection module and the ops room dashboard
-- **Emergency Medical Doctors** — validated the medical consequences of incomplete pre-arrival information; confirmed the triage schema fields match actual dispatch needs
-
-Key findings:
+Key findings from field research:
 - Dispatchers currently relay verbal descriptions only — no structured data reaches paramedics
-- False emergency calls represent a significant resource drain (~15% dispatch rate estimate)
-- Most critical pre-arrival data: victim count, primary condition, and precise location
+- Officers confirmed three operational failures: no digitalization, no location tracking, no structured multi-victim assessment
+- Active-duty officers explicitly requested the scam detection module and the operations room dashboard
+- Civil Protection offered national distribution channels for Phase 2 deployment
+
+> *"An operations room dashboard showing real-time structured intelligence the moment a call comes in."*  
+> — Civil Protection Officer, Tunisia 2026
+
+---
+
+## Hospital Network (Tunisia)
+
+| Hospital | City | Specialties |
+|---|---|---|
+| Hôpital Charles Nicolle | Tunis | Trauma, Cardiac, Neurology, Burns |
+| Hôpital Habib Thameur | Tunis | Trauma, Orthopedic, General |
+| Hôpital Militaire de Tunis | Tunis | Trauma, Cardiac, Neurology |
+| Clinique Les Oliviers | Tunis | Cardiac, General |
+| Hôpital Régional de Bizerte | Bizerte | Trauma, General |
+| Hôpital Farhat Hached | Sousse | Trauma, Cardiac, Neurology |
+| Hôpital Hédi Chaker | Sfax | Trauma, Burns, Orthopedic |
+| Hôpital Mohamed Tahar Maamouri | Nabeul | Trauma, General |
+| Hôpital Régional de Béja | Béja | General, Trauma |
 
 ---
 
 ## Disclaimer
 
-Zero-Minute Dispatch is a research prototype built for educational and hackathon purposes. It is not certified for clinical or operational deployment. All AI outputs require human verification before any emergency action is taken.
+Zero-Minute Dispatch is a research prototype. It is not certified for clinical or operational deployment. All AI outputs require human verification by trained dispatchers before any emergency action is taken.
 
 ---
 
@@ -584,4 +443,5 @@ First-Year Computer Engineering Student
 NVIDIA Certified — Generative AI / LLM & Deep Learning  
 Microsoft Summer Intern 2026
 
-*Humanovators 2.0 — April 2026*
+🏆 *1st Place — Humanovators 2.0 Hackathon, April 2026*
+
