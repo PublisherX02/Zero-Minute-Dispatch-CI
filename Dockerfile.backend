@@ -14,11 +14,13 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Python deps ────────────────────────────────────────────────────────────────
-# --no-cache-dir   → pip does not write its cache to disk (saves ~200 MB)
-# CPU-only torch wheel → saves ~800 MB vs the default CUDA wheel
-# All in one RUN so the layer is as tight as possible.
+# All in one RUN to minimize layer count.
+# 1. Upgrade pip
+# 2. Install CPU-only torch FIRST (prevents transformers/accelerate from pulling CUDA wheels)
+# 3. Install remaining backend/ML deps while ignoring frontend-specific ones
 COPY requirements.txt .
 RUN pip install --upgrade pip --no-cache-dir \
+    && pip install --no-cache-dir torch==2.3.0 --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir \
         fastapi==0.111.0 \
         uvicorn==0.30.0 \
@@ -28,9 +30,7 @@ RUN pip install --upgrade pip --no-cache-dir \
         requests \
         sentencepiece \
         accelerate \
-        transformers==4.41.0 \
-    && pip install --no-cache-dir \
-        torch==2.3.0 --index-url https://download.pytorch.org/whl/cpu
+        transformers==4.41.0
 
 # ── App source ─────────────────────────────────────────────────────────────────
 COPY app/ ./app/
